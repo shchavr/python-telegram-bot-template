@@ -16,16 +16,14 @@ bot.
 
 import os
 import logging
-from typing import Dict
-
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update, BotCommand
+import random
+from telegram import ReplyKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
     MessageHandler,
-    PicklePersistence,
     filters,
 )
 
@@ -33,156 +31,436 @@ from telegram.ext import (
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-# set higher logging level for httpx to avoid all GET and POST requests being logged
-logging.getLogger("httpx").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
-CHOOSING, TYPING_REPLY, TYPING_CHOICE = range(3)
+CHOOSING = range(1)
 
 reply_keyboard = [
-    ["Age", "Favourite colour"],
-    ["Number of siblings", "Something else..."],
-    ["Done"],
+    ["Наука", "История"],
+    ["Природа", "Случайный"],
+    ["Стоп"],
 ]
-markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True)
+markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False)
+
+facts = {
+    "Наука": [
+        "Свет проходит от Солнца до Земли примерно за 8 минут.",
+        "Вода может существовать в трех состояниях: твердом, жидком и газообразном.",
+        "Человеческий мозг на 75% состоит из воды.",
+        "Атомы на 99.9999999999999% пусты.",
+        "Земля вращается вокруг своей оси со скоростью около 1670 километров в час.",
+        "Генетический материал человека на 99.9% идентичен генетическому материалу шимпанзе.",
+        "Температура внутри звезды может достигать 15 миллионов градусов Цельсия.",
+        "Ультразвук используется в медицине для диагностики и лечения.",
+        "Микробы, живущие в нашем организме, составляют до 90% клеток, которые находятся в нашем теле.",
+        "Кристаллы соли могут помочь в сохранении продуктов, так как обладают антимикробными свойствами."
+    ],
+    "История": [
+        "Древние египтяне строили пирамиды, используя тысячи рабочих.",
+        "Первая известная цивилизация — Шумеры в Месопотамии.",
+        "Вторжение в Великобританию произошло в 1066 году во время Нормандского завоевания.",
+        "В 1492 году Колумб открыл Америку.",
+        "Римская империя достигла своего максимального развития около 117 года н.э.",
+        "Сунь Цзы, древнекитайский полководец, написал 'Искусство войны' более 2500 лет назад.",
+        "Первые Олимпийские игры прошли в Греции в 776 году до н.э.",
+        "В Средние века европейцы верили, что Земля плоская и окружена морем.",
+        "Фараоны Древнего Египта правили более 3000 лет.",
+        "Эпидемия чумы в Европе в XIV веке убила около 25 миллионов человек."
+    ],
+    "Природа": [
+        "В мире существует около 8,7 миллионов видов живых организмов.",
+        "Самая высокая гора на Земле — Эверест, высота 8848 метров.",
+        "Медузы не имеют мозга, сердца и костей.",
+        "Лягушки могут замедлять свой метаболизм так, что они могут 'спать' в течение многих месяцев.",
+        "Слон — единственное млекопитающее, которое не может прыгать.",
+        "Леса обеспечивают около 28% кислорода на Земле.",
+        "Большие океанские волны могут достигать высоты более 30 метров.",
+        "У различных видов бабочек могут быть разные цвета и узоры на крыльях.",
+        "Фаун на Антарктиде и других континентах развивается отдельно, что делает экосистему уникальной.",
+        "Коралловые рифы являются одним из самых разнообразных экосистем на планете."
+    ],
+    "Случайный": [
+        "Водопад Анхель в Венесуэле — самый высокий водопад в мире, высота 979 метров.",
+        "В Австралии больше овец, чем людей.",
+        "Курицы могут помнить лица до 100 различных людей.",
+        "Бобры имеют непрерывный рост зубов, которые они должны стачивать.",
+        "Дельфины могут распознавать себя в зеркале.",
+        "Панды могут есть до 38 килограммов бамбука в день.",
+        "Альбатрос может пролететь более 10 000 километров без остановки.",
+        "В мире существует более 2000 видов растений, которые являются съедобными.",
+        "Самая тёмная тень создаётся в полнолуние, когда луна полностью освещает землю.",
+        "Выдры держатся за руки, когда спят, чтобы не потерять друг друга в воде."
+    ]
+}
 
 
-def facts_to_str(user_data: Dict[str, str]) -> str:
-    """Helper function for formatting the gathered user info."""
-    facts = [f"{key} - {value}" for key, value in user_data.items()]
-    return "\n".join(facts).join(["\n", "\n"])
-
+def get_random_fact(category: str) -> str:
+    """Получить случайный факт по заданной категории."""
+    logger.info(f"Запрос факта для категории: {category}")  # Логгируем категорию
+    
+    if category in facts:
+        fact = random.choice(facts[category])  # Выбираем случайный факт из списка
+        logger.info(f"{fact}")  # Логгируем полученный факт
+        return fact
+    else:
+        logger.error(f"Неизвестная категория: {category}")
+        return "Не удалось получить факт, попробуйте другую категорию."
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Start the conversation, display any stored data and ask user for input."""
+    """Начните разговор и покажите варианты для категорий фактов."""
     user = update.message.from_user
     logger.info(f"User {user.full_name} started app.")
     
-    reply_text = "Hi! My name is Doctor Botter."
-    if context.user_data:
-        reply_text += (
-            f" You already told me your {', '.join(context.user_data.keys())}. Why don't you "
-            "tell me something more about yourself? Or change anything I already know."
-        )
-    else:
-        reply_text += (
-            " I will hold a more complex conversation with you. Why don't you tell me "
-            "something about yourself?"
-        )
-    await update.message.reply_text(reply_text, reply_markup=markup)
+    await update.message.reply_text(
+        "Привет! Я бот-генератор фактов. Выберите категорию:",
+        reply_markup=markup
+    )
 
     return CHOOSING
-
 
 async def regular_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ask the user for info about the selected predefined choice."""
-    text = update.message.text.lower()
-    context.user_data["choice"] = text
-    if context.user_data.get(text):
-        reply_text = (
-            f"Your {text}? I already know the following about that: {context.user_data[text]}"
-        )
-    else:
-        reply_text = f"Your {text}? Yes, I would love to hear about that!"
-    await update.message.reply_text(reply_text)
+    """Обработка выбора категории фактов от пользователя."""
+    category = update.message.text
+    if category == "Стоп":
+        await update.message.reply_text("Вы остановили бота. Чтобы запустить снова, введите /start.")
+        return ConversationHandler.END
 
-    return TYPING_REPLY
+    context.user_data["category"] = category
 
 
-async def custom_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ask the user for a description of a custom category."""
-    await update.message.reply_text(
-        'Alright, please send me the category first, for example "Most impressive skill"'
-    )
-
-    return TYPING_CHOICE
-
-
-async def received_information(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Store info provided by user and ask for the next category."""
-    text = update.message.text
-    category = context.user_data["choice"]
-    context.user_data[category] = text.lower()
-    del context.user_data["choice"]
-
-    await update.message.reply_text(
-        "Neat! Just so you know, this is what you already told me:"
-        f"{facts_to_str(context.user_data)}"
-        "You can tell me more, or change your opinion on something.",
-        reply_markup=markup,
-    )
+    fact = get_random_fact(category)
+    await update.message.reply_text(f"{fact}")
 
     return CHOOSING
 
-
-async def show_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Display the gathered info."""
-    await update.message.reply_text(
-        f"This is what you already told me: {facts_to_str(context.user_data)}"
-    )
-
-
 async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Display the gathered info and end the conversation."""
-    if "choice" in context.user_data:
-        del context.user_data["choice"]
-
-    await update.message.reply_text(
-        f"I learned these facts about you: {facts_to_str(context.user_data)}Until next time!",
-        reply_markup=ReplyKeyboardRemove(),
-    )
+    """Завершить разговор и попрощаться с пользователем."""
+    await update.message.reply_text("Спасибо за использование бота! До свидания!")
     return ConversationHandler.END
 
-# Функция для регистрации команд в BotFather
-async def post_init(application: Application) -> None:
-    bot_commands = [
-        BotCommand("start", "Начало работы с ботом"),
-        # BotCommand("cancel", "Отменить текущую операцию")
-    ]
-    await application.bot.set_my_commands(bot_commands)
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Обработчик для отмены."""
+    await update.message.reply_text("Вы отменили разговор. До свидания!")
+    return ConversationHandler.END
 
 def main() -> None:
-    """Run the bot."""
-    # Create the Application and pass it your bot's token.
-    persistence = PicklePersistence(filepath="data/data", single_file=False)
-    application = Application.builder().token(os.getenv("BOT_TOKEN")).persistence(persistence).post_init(post_init).build()
+    """Запуск бота."""
+    application = Application.builder().token("7266582099:AAHE3QmlHbA_9Jn1gC4amAzYo8I1bQRzNHA").build()
 
-    # Add conversation handler with the states CHOOSING, TYPING_CHOICE and TYPING_REPLY
+    # Определение обработчиков для разговоров
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
             CHOOSING: [
-                MessageHandler(
-                    filters.Regex("^(Age|Favourite colour|Number of siblings)$"), regular_choice
-                ),
-                MessageHandler(filters.Regex("^Something else...$"), custom_choice),
-            ],
-            TYPING_CHOICE: [
-                MessageHandler(
-                    filters.TEXT & ~(filters.COMMAND | filters.Regex("^Done$")), regular_choice
-                )
-            ],
-            TYPING_REPLY: [
-                MessageHandler(
-                    filters.TEXT & ~(filters.COMMAND | filters.Regex("^Done$")),
-                    received_information,
-                )
+                MessageHandler(filters.TEXT & ~filters.COMMAND, regular_choice)
             ],
         },
-        fallbacks=[MessageHandler(filters.Regex("^Done$"), done)],
-        name="my_conversation",
-        persistent=True,
+        fallbacks=[CommandHandler("done", done), CommandHandler("cancel", cancel)],
     )
 
     application.add_handler(conv_handler)
 
-    show_data_handler = CommandHandler("show_data", show_data)
-    application.add_handler(show_data_handler)
+    # Запуск бота
+    application.run_polling()
 
-    # Run the bot until the user presses Ctrl-C
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
+
+
+
+# Попытка использовать API
+# import os
+# import logging
+# from typing import Dict
+# import requests
+# from telegram import ReplyKeyboardMarkup, Update
+# from telegram.ext import (
+#     Application,
+#     CommandHandler,
+#     ContextTypes,
+#     ConversationHandler,
+#     MessageHandler,
+#     filters,
+# )
+
+# # Enable logging
+# logging.basicConfig(
+#     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+# )
+
+# logger = logging.getLogger(__name__)
+
+# CHOOSING = range(1)
+
+# reply_keyboard = [
+#     ["Наука", "История"],
+#     ["Природа", "Случайный"],
+#     ["Стоп"],
+# ]
+# markup = ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False)
+
+# def get_random_fact(category: str) -> str:
+#     """Получить случайный факт по заданной категории."""
+#     logger.info(f"Запрос факта для категории: {category}")  # Логгируем категорию
+#     if category == "Наука":
+#         response = requests.get("https://some-random-api.ml/facts/science")
+#     elif category == "История":
+#         response = requests.get("https://api.adviceslip.com/advice")  # Это не совсем факты, но можно использовать другое API
+#     elif category == "Природа":
+#         response = requests.get("https://some-random-api.ml/facts/nature")
+#     else:  # Случайный
+#         response = requests.get("https://uselessfacts.jsph.pl/random.json?language=ru")
+
+#     if response.status_code == 200:
+#         if category in ["Наука", "Природа"]:
+#             fact = response.json().get("fact", "Нет доступных фактов.")
+#             logger.info(f"Получен факт: {fact}")  # Логгируем полученный факт
+#             return fact
+#         elif category == "Случайный":
+#             fact = response.json().get('text', 'Нет доступных фактов.')  # Проверяем ключ
+#             return fact
+#         return response.json().get('slip', {}).get('advice', 'Нет доступных фактов.')
+
+#     logger.error(f"Ошибка получения факта: {response.status_code}")  # Логгируем ошибку
+#     return "Не удалось получить факт, попробуйте еще раз."
+
+# async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Начните разговор и покажите варианты для категорий фактов."""
+#     user = update.message.from_user
+#     logger.info(f"User {user.full_name} started app.")
+    
+#     await update.message.reply_text(
+#         "Привет! Я бот-генератор фактов. Выберите категорию:",
+#         reply_markup=markup
+#     )
+
+#     return CHOOSING
+
+# async def regular_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Обработка выбора категории фактов от пользователя."""
+#     category = update.message.text
+#     if category == "Стоп":
+
+
+#         await update.message.reply_text("Вы остановили бота. Чтобы запустить снова, введите /start.")
+#         return ConversationHandler.END
+
+#     context.user_data["category"] = category
+#     fact = get_random_fact(category)
+#     await update.message.reply_text(f"Вот ваш факт о {category}: {fact}")
+
+#     return CHOOSING
+
+# async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Завершить разговор и попрощаться с пользователем."""
+#     await update.message.reply_text("Спасибо за использование бота! До свидания!")
+#     return ConversationHandler.END
+
+# async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     """Обработчик для отмены."""
+#     await update.message.reply_text("Вы отменили разговор. До свидания!")
+#     return ConversationHandler.END
+
+# def main() -> None:
+#     """Запуск бота."""
+#     application = Application.builder().token("7266582099:AAHE3QmlHbA_9Jn1gC4amAzYo8I1bQRzNHA").build()
+
+#     # Определение обработчиков для разговоров
+#     conv_handler = ConversationHandler(
+#         entry_points=[CommandHandler("start", start)],
+#         states={
+#             CHOOSING: [
+#                 MessageHandler(filters.TEXT & ~filters.COMMAND, regular_choice)
+#             ],
+#         },
+#         fallbacks=[CommandHandler("done", done), CommandHandler("cancel", cancel)],
+#     )
+
+#     application.add_handler(conv_handler)
+
+#     # Запуск бота
+#     application.run_polling()
+
+# if __name__ == '__main__':
+#     main()
+
+
+
+
+# import os
+# from dotenv import load_dotenv
+# from telegram.ext import ApplicationBuilder
+
+# def main():
+#     load_dotenv()  # Загрузка переменных окружения из файла .env
+#     token = os.getenv("BOT_TOKEN")
+
+#     # Вывод токена на экран (не публикуйте этот токен в открытых источниках!)
+#     print(f"Токен: {token}")
+
+#     if not token:
+#         print("Ошибка: токен бота не установлен или не загружен.")
+#         return  # Прекратить выполнение, если токен не загружен
+
+#     application = ApplicationBuilder().token(token).build()
+#     # ... остальная логика вашего бота ...
+
+# if __name__ == "__main__":
+#     main()
+
+
+
+
+# Попытка усовершенстовать бота
+# import os
+# import logging
+# import random
+# from telegram import ReplyKeyboardMarkup, Update
+# from telegram.ext import (
+#     Application,
+#     CommandHandler,
+#     ContextTypes,
+#     ConversationHandler,
+#     MessageHandler,
+#     filters,
+# )
+
+# # Enable logging
+# logging.basicConfig(
+#     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+# )
+
+# logger = logging.getLogger(__name__)
+
+# CHOOSING, FACTS, QUIZ = range(3)
+
+# reply_keyboard = [
+#     ["Факты", "Викторина"],
+#     ["Стоп"],
+# ]
+
+# facts = {
+#     "Наука": [
+#         "Свет проходит от Солнца до Земли примерно за 8 минут.",
+#         "Вода может существовать в трех состояниях: твердом, жидком и газообразном.",
+#         "Человеческий мозг на 75% состоит из воды.",
+#     ],
+#     "История": [
+#         "Древние египтяне строили пирамиды, используя тысячи рабочих.",
+#         "Первая известная цивилизация — Шумеры в Месопотамии.",
+#     ],
+#     "Природа": [
+#         "В мире существует около 8,7 миллионов видов живых организмов.",
+#         "Самая высокая гора на Земле — Эверест, высота 8848 метров.",
+#     ],
+#     "Случайный": [
+#         "Водопад Анхель в Венесуэле — самый высокий водопад в мире, высота 979 метров.",
+#         "В Австралии больше овец, чем людей.",
+#     ]
+# }
+
+# questions = {
+#     "Какой элемент химической таблицы обозначается символом 'O'?": ["Кислород", "Азот", "Водород", "Углерод"],
+#     "Какой океан самый большой?": ["Атлантический", "Индийский", "Тихий", "Северный Ледовитый"],
+# }
+
+# def get_random_fact(category: str) -> str:
+#     logger.info(f"Запрос факта для категории: {category}")
+    
+#     if category in facts:
+#         fact = random.choice(facts[category])
+#         logger.info(f"{fact}")
+#         return fact
+#     else:
+#         logger.error(f"Неизвестная категория: {category}")
+#         return "Не удалось получить факт, попробуйте другую категорию."
+
+# async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     user = update.message.from_user
+#     logger.info(f"User {user.full_name} started app.")
+    
+#     await update.message.reply_text(
+#         "Привет! Я бот-генератор фактов и викторин. Выберите опцию:",
+#         reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False)
+#     )
+
+#     return CHOOSING
+
+# async def facts_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     await update.message.reply_text("Выберите категорию фактов: Наука, История, Природа, Случайный.")
+
+#     return FACTS
+
+# async def regular_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     category = update.message.text
+#     fact = get_random_fact(category)
+#     await update.message.reply_text(f"{fact}")
+    
+#     # Предложить выбрать снова
+#     await update.message.reply_text(
+#         "Хотите получить еще факты или вернуться в меню? (Введите 'Факты' для выбора фактов, 'Викторина' для викторины или 'Стоп' для выхода)",
+#         reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False)
+#     )
+
+#     return CHOOSING
+
+# async def quiz_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     question = random.choice(list(questions.keys()))
+#     options = questions[question]
+#     reply_keyboard = [[option] for option in options]
+
+
+#     await update.message.reply_text(question, reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=True))
+#     context.user_data["correct_answer"] = options[0]  # Первая опция — правильный ответ
+
+#     return QUIZ
+
+# async def quiz_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     user_answer = update.message.text
+#     correct_answer = context.user_data["correct_answer"]
+    
+#     if user_answer == correct_answer:
+#         await update.message.reply_text("Правильно! Молодец!")
+#     else:
+#         await update.message.reply_text(f"Неправильно. Правильный ответ: {correct_answer}.")
+    
+#     # Предложить выбрать снова
+#     await update.message.reply_text(
+#         "Хотите продолжить викторину или вернуться в меню? (Введите 'Факты' для выбора фактов, 'Викторина' для викторины или 'Стоп' для выхода)",
+#         reply_markup=ReplyKeyboardMarkup(reply_keyboard, one_time_keyboard=False)
+#     )
+
+#     return CHOOSING
+
+# async def done(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     await update.message.reply_text("Спасибо за использование бота! До свидания!")
+#     return ConversationHandler.END
+
+# async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+#     await update.message.reply_text("Вы отменили разговор. До свидания!")
+#     return ConversationHandler.END
+
+# def main() -> None:
+#     application = Application.builder().token("7266582099:AAHE3QmlHbA_9Jn1gC4amAzYo8I1bQRzNHA").build()
+
+#     conv_handler = ConversationHandler(
+#         entry_points=[CommandHandler("start", start)],
+#         states={
+#             CHOOSING: [MessageHandler(filters.TEXT & ~filters.COMMAND, facts_choice)],
+#             FACTS: [
+#                 MessageHandler(filters.TEXT & ~filters.COMMAND, regular_choice)
+#             ],
+#             QUIZ: [
+#                 MessageHandler(filters.TEXT & ~filters.COMMAND, quiz_answer)
+#             ],
+#         },
+#         fallbacks=[CommandHandler("done", done), CommandHandler("cancel", cancel)],
+#     )
+
+#     application.add_handler(conv_handler)
+
+#     application.run_polling()
+
+# if __name__ == '__main__':
+#     main()
