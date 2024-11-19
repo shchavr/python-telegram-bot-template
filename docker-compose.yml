@@ -1,17 +1,18 @@
+version: '3.8'
+
 services:
   pythontelegrambottemplate:
-    #image: ghcr.io/<ваш профиль гит хаб>/<назввание репозитория>
-    image: pythontelegrambottemplate
+    image: ghcr.io/shchavr/telegram-bot
     build:
       context: .
       dockerfile: ./Dockerfile
     environment:
-      TZ: "${TZ}"
-      BOT_TOKEN: "${BOT_TOKEN}"
-      PYTHONPATH: "${PYTHONPATH}"
-    # либо просто
-    # env_file:
-    #   - .env
+      TZ: "${Europe/Moscow}"  
+      BOT_TOKEN: "${BOT_TOKEN}"  
+      PYTHONPATH: "${PYTHONPATH}"  
+
+    env_file:
+      - .env  
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data  
     restart: unless-stopped
